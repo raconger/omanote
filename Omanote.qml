@@ -26,6 +26,9 @@ Item {
   property bool settingsLoaded: false
   property bool editingSettings: false
   property string settingsInput: ""
+  // Set whenever the resolved notes folder can't be created/accessed, so the
+  // UI can say so instead of silently looking like an empty folder.
+  property string dirError: ""
 
   property var shell: null
   property var manifest: null
@@ -101,7 +104,7 @@ Item {
       root.beginSettingsEdit(Quickshell.env("OMANOTE_NOTES_DIR") || (root.homeDir + "/notes"))
     } else {
       root.editingSettings = false
-      root.runList()
+      root.ensureDir(root.expandedNotesDir)
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     }
   }
@@ -140,6 +143,11 @@ Item {
   }
 
   function ensureDir(path) {
+    if (mkdirProc.running) {
+      mkdirProc.queuedPath = path
+      return
+    }
+    mkdirProc.targetPath = path
     mkdirProc.command = ["mkdir", "-p", path]
     mkdirProc.running = true
   }
@@ -157,7 +165,6 @@ Item {
     root.editingSettings = false
     root.saveSettings()
     root.ensureDir(expanded)
-    root.runList()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -292,7 +299,28 @@ Item {
     onLoadFailed: root.loadSettings("{}")
   }
 
-  Process { id: mkdirProc }
+  Process {
+    id: mkdirProc
+    property string targetPath: ""
+    property string queuedPath: ""
+    property string stderrText: ""
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: mkdirProc.stderrText = text
+    }
+    onExited: function(exitCode) {
+      var path = mkdirProc.targetPath
+      var accessible = exitCode === 0 && path !== ""
+      root.dirError = accessible ? "" : ("Can't access notes folder “" + path + "”"
+        + (mkdirProc.stderrText ? ": " + mkdirProc.stderrText.trim() : "") + ". Press Ctrl+, to change it.")
+      if (path === root.expandedNotesDir) root.runList()
+      if (mkdirProc.queuedPath) {
+        var next = mkdirProc.queuedPath
+        mkdirProc.queuedPath = ""
+        root.ensureDir(next)
+      }
+    }
+  }
 
   PointerMoveGate {
     id: pointerGate
@@ -510,9 +538,21 @@ Item {
           }
         }
 
+        Text {
+          id: errorText
+          width: parent.width
+          visible: root.dirError !== ""
+          text: root.dirError
+          color: Color.urgent
+          wrapMode: Text.WordWrap
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
         Item {
           width: parent.width
           height: parent.height - root.headerHeight - root.contentSpacing
+            - (root.dirError !== "" ? errorText.height + root.contentSpacing : 0)
 
           Row {
             anchors.fill: parent
