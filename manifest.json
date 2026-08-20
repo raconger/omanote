@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.raconger.omanote",
+  "name": "Omanote",
+  "version": "1.0.0",
+  "author": "Ryan Conger",
+  "license": "MIT",
+  "description": "A fast, keyboard-only note launcher in the spirit of Notational Velocity: search, open, and create plain-text notes in a flat folder.",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Omanote.qml"
+  }
+}
