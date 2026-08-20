@@ -179,11 +179,16 @@ Item {
       displayModel.clear()
       return
     }
+    listProc.pendingArgs = [root.scriptPath, root.expandedNotesDir, root.filterText]
     if (listProc.running) {
-      listProc.hasQueued = true
+      // Cancel whatever's in flight so the latest keystroke wins immediately
+      // instead of waiting behind a slower, now-stale scan (e.g. the initial
+      // unfiltered listing of a large vault).
+      listProc.running = false
       return
     }
-    listProc.command = [root.scriptPath, root.expandedNotesDir, root.filterText]
+    listProc.command = listProc.pendingArgs
+    listProc.pendingArgs = null
     listProc.running = true
   }
 
@@ -215,7 +220,11 @@ Item {
     root.filterText = nextFilter
     root.selectedIndex = 0
     root.disarmPointer()
-    root.runList()
+    // Debounced: re-running the scan cancels whatever's in flight (see
+    // runList/listProc), and that cancel has real teardown cost, so firing
+    // it on every keystroke of a fast burst makes typing feel slower, not
+    // faster. Wait for a short pause instead, so a burst costs one cancel.
+    filterDebounce.restart()
   }
 
   function select(delta) {
@@ -329,15 +338,16 @@ Item {
 
   Process {
     id: listProc
-    property bool hasQueued: false
+    property var pendingArgs: null
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.applyListing(text)
     }
     onExited: {
-      if (listProc.hasQueued) {
-        listProc.hasQueued = false
-        listProc.command = [root.scriptPath, root.expandedNotesDir, root.filterText]
+      if (listProc.pendingArgs) {
+        var args = listProc.pendingArgs
+        listProc.pendingArgs = null
+        listProc.command = args
         listProc.running = true
       }
     }
@@ -358,6 +368,13 @@ Item {
     interval: 400
     repeat: false
     onTriggered: root.doSave()
+  }
+
+  Timer {
+    id: filterDebounce
+    interval: 120
+    repeat: false
+    onTriggered: root.runList()
   }
 
   PanelWindow {
