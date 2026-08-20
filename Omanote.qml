@@ -37,6 +37,7 @@ Item {
   readonly property real sidebarFractionMin: 0.15
   readonly property real sidebarFractionMax: 0.6
   property string sortMode: "modified"     // "modified" | "title"
+  property bool fullscreen: false
 
   property var shell: null
   property var manifest: null
@@ -77,8 +78,12 @@ Item {
   property int contentMargin: Style.spacing.panelPadding
   property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
   property int contentSpacing: Style.spacing.md
-  property int cardWidth: Math.min(Style.space(600), panel.width - Style.gapsOut * 2)
-  property int cardHeight: Math.min(Style.space(400), panel.height - Style.gapsOut * 2)
+  property int cardWidth: root.fullscreen
+    ? panel.width - Style.gapsOut * 2
+    : Math.min(Style.space(1100), panel.width - Style.gapsOut * 2)
+  property int cardHeight: root.fullscreen
+    ? panel.height - Style.gapsOut * 2
+    : Math.min(Style.space(700), panel.height - Style.gapsOut * 2)
   property int rowHeight: Math.max(Style.space(50), Style.font.body + Style.font.caption + Style.spacing.rowPaddingX * 2)
 
   readonly property var selectedRow: (root.cursorActive && root.selectedIndex >= 0 && root.selectedIndex < displayModel.count)
@@ -154,6 +159,7 @@ Item {
       ? Math.max(root.sidebarFractionMin, Math.min(root.sidebarFractionMax, fraction))
       : root.sidebarFraction
     root.sortMode = parsed.sortMode === "title" ? "title" : "modified"
+    root.fullscreen = !!parsed.fullscreen
     root.settingsLoaded = true
     if (root.notesDir) root.runList()
     if (root.opened) root.afterSettingsReady()
@@ -166,7 +172,8 @@ Item {
       sidebarPosition: root.sidebarPosition,
       sidebarCollapsed: root.sidebarCollapsed,
       sidebarFraction: root.sidebarFraction,
-      sortMode: root.sortMode
+      sortMode: root.sortMode,
+      fullscreen: root.fullscreen
     }, null, 2) + "\n")
   }
 
@@ -231,8 +238,39 @@ Item {
     root.applyListing(root.lastRaw)
   }
 
+  function toggleFullscreen() {
+    root.fullscreen = !root.fullscreen
+    root.saveSettings()
+  }
+
   function insertIsoDate() {
     root.setFilter(root.filterText + NoteStore.isoDateString(new Date()))
+  }
+
+  // Layout shortcuts that make sense regardless of which pane has keyboard
+  // focus (search field vs. note body) — wired into both key handlers below
+  // so e.g. Ctrl+B doesn't silently do nothing while editing a note.
+  function handleGlobalShortcut(event) {
+    if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_F) {
+      root.toggleFullscreen()
+      return true
+    } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_B) {
+      root.toggleSidebar()
+      return true
+    } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_L) {
+      root.toggleSidebarPosition()
+      return true
+    } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_BracketLeft) {
+      root.nudgeSidebarFraction(-0.02)
+      return true
+    } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_BracketRight) {
+      root.nudgeSidebarFraction(0.02)
+      return true
+    } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_Period) {
+      root.cycleSortMode()
+      return true
+    }
+    return false
   }
 
   function runList() {
@@ -580,23 +618,10 @@ Item {
           } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_Comma) {
             root.beginSettingsEdit(root.notesDir)
             event.accepted = true
-          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_B) {
-            root.toggleSidebar()
-            event.accepted = true
-          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_L) {
-            root.toggleSidebarPosition()
-            event.accepted = true
-          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_BracketLeft) {
-            root.nudgeSidebarFraction(-0.02)
-            event.accepted = true
-          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_BracketRight) {
-            root.nudgeSidebarFraction(0.02)
-            event.accepted = true
-          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_Period) {
-            root.cycleSortMode()
-            event.accepted = true
           } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_D) {
             root.insertIsoDate()
+            event.accepted = true
+          } else if (root.handleGlobalShortcut(event)) {
             event.accepted = true
           } else if (Util.editsFilter(event, root.filterText)) {
             root.setFilter(Util.editedFilter(event, root.filterText))
@@ -841,6 +866,8 @@ Item {
                         contentEditor.cursorPosition = edit.cursorAt
                         event.accepted = true
                       }
+                    } else if (root.handleGlobalShortcut(event)) {
+                      event.accepted = true
                     }
                   }
                 }

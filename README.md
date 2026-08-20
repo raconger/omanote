@@ -21,11 +21,12 @@ native macOS apps.
   item continues it; `Enter` on an empty one ends the list instead
 - Sidebar (the results list) is collapsible, can sit on the left or the top,
   and its size is drag- or keyboard-adjustable
+- Full-screen toggle (`Ctrl+F`) for a bigger canvas when you want it
 - Keyboard nav (arrows, Page Up/Down, Home/End) and mouse both work
 
 Not in v1 (nvALT has these; flagging as candidate follow-ups, not built):
-tags, Markdown rendering/preview-in-browser, full-screen mode, note
-locking/encryption, external sync (Simplenote/Supernote).
+tags, Markdown rendering/preview-in-browser, note locking/encryption,
+external sync (Simplenote/Supernote).
 
 ## Using it
 
@@ -50,7 +51,10 @@ locking/encryption, external sync (Simplenote/Supernote).
   drag-resizable from the divider between it and the editor.
 - `Ctrl+.` cycles the sort order between most-recently-modified (default)
   and alphabetical by title.
+- `Ctrl+F` toggles full-screen.
 - `Ctrl+D` inserts today's date (`YYYY-MM-DD`) into the search/create field.
+- `Ctrl+B`/`Ctrl+L`/`Ctrl+[`/`Ctrl+]`/`Ctrl+.`/`Ctrl+F` all work whether the
+  search field or the note body currently has focus.
 
 ## Install
 
@@ -105,9 +109,9 @@ bind = SUPER, N, exec, omarchy-shell shell toggle io.github.raconger.omanote '{}
   file instead of one process per file, so search stays fast even in a
   vault with thousands of notes.
 - `~/.local/state/omarchy/omanote.json` — settings Omanote persists: your
-  chosen notes folder, sidebar position/collapsed/size, and sort order.
-  Written by the in-overlay settings prompt and by the layout/sort
-  keybindings below.
+  chosen notes folder, sidebar position/collapsed/size, sort order, and
+  full-screen state. Written by the in-overlay settings prompt and by the
+  layout/sort keybindings below.
 
 ## Testing
 
