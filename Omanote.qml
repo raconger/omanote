@@ -43,6 +43,7 @@ Item {
   property var manifest: null
 
   property bool opened: false
+  property bool showHelp: false
   property string filterText: ""
   property int selectedIndex: 0
   property bool cursorActive: false
@@ -93,6 +94,26 @@ Item {
     : (root.selectedRow !== null && root.selectedRow.rowType === "note" ? NoteStore.joinPath(root.expandedNotesDir, root.selectedRow.fileName) : "")
   readonly property string activeNoteTitle: root.manualOverridePath !== "" ? NoteStore.titleForFile(root.manualOverridePath.split("/").pop())
     : (root.selectedRow !== null ? root.selectedRow.title : "")
+
+  // Single source of truth for the help overlay (Ctrl+/) — keep this in sync
+  // with handleGlobalShortcut() and the two Keys.onPressed handlers below.
+  readonly property var shortcutHelp: [
+    { keys: "↑ / ↓", desc: "Move selection" },
+    { keys: "Page Up / Page Down", desc: "Jump by a page" },
+    { keys: "Home / End", desc: "Jump to first / last note" },
+    { keys: "Enter", desc: "Create note, or edit the selected one" },
+    { keys: "Escape", desc: "Clear search, then close" },
+    { keys: "Ctrl+,", desc: "Change notes folder" },
+    { keys: "Ctrl+B", desc: "Collapse / expand the sidebar" },
+    { keys: "Ctrl+L", desc: "Move the sidebar between left and top" },
+    { keys: "Ctrl+[ / Ctrl+]", desc: "Shrink / grow the sidebar" },
+    { keys: "Ctrl+.", desc: "Cycle sort order (modified / title)" },
+    { keys: "Ctrl+F", desc: "Toggle full-screen" },
+    { keys: "Ctrl+D", desc: "Insert today's date into the search field" },
+    { keys: "Ctrl+/", desc: "Show / hide this help" },
+    { keys: "Enter (in a list line)", desc: "Continue the bullet, task, or numbered item" },
+    { keys: "Escape (while editing)", desc: "Return focus to search" }
+  ]
 
   function open(payloadJson) {
     var args = {}
@@ -247,11 +268,22 @@ Item {
     root.setFilter(root.filterText + NoteStore.isoDateString(new Date()))
   }
 
+  function toggleHelp() {
+    root.showHelp = !root.showHelp
+    // Route focus back to keyCatcher regardless of which pane triggered the
+    // toggle, so the help-mode key guard (which only lives in keyCatcher's
+    // handler) is the one seeing subsequent keystrokes.
+    if (root.showHelp) Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
   // Layout shortcuts that make sense regardless of which pane has keyboard
   // focus (search field vs. note body) — wired into both key handlers below
   // so e.g. Ctrl+B doesn't silently do nothing while editing a note.
   function handleGlobalShortcut(event) {
-    if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_F) {
+    if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_Slash) {
+      root.toggleHelp()
+      return true
+    } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_F) {
       root.toggleFullscreen()
       return true
     } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_B) {
@@ -611,6 +643,16 @@ Item {
 
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
+          if (root.showHelp) {
+            // Help replaces the search/list view entirely, so nothing here
+            // should fall through to filter-editing or navigation — only
+            // Escape and the other global shortcuts (Ctrl+/ included) do
+            // anything while it's open.
+            if (event.key === Qt.Key_Escape) root.showHelp = false
+            else root.handleGlobalShortcut(event)
+            event.accepted = true
+            return
+          }
           if (event.key === Qt.Key_Escape) {
             if (root.filterText) root.setFilter("")
             else root.dismiss()
@@ -661,7 +703,77 @@ Item {
         anchors.bottomMargin: card.contentBottomInset
         anchors.leftMargin: card.contentLeftInset
         spacing: root.contentSpacing
-        visible: !root.editingSettings
+        visible: !root.editingSettings && root.showHelp
+
+        Rectangle {
+          width: parent.width
+          height: root.headerHeight
+          radius: root.cornerRadius
+          color: "transparent"
+
+          Text {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Keyboard shortcuts"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.heading
+          }
+        }
+
+        Flickable {
+          width: parent.width
+          height: parent.height - root.headerHeight - root.contentSpacing
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+          contentWidth: width
+          contentHeight: helpList.height
+
+          Column {
+            id: helpList
+            width: parent.width
+            spacing: Style.space(4)
+
+            Repeater {
+              model: root.shortcutHelp
+
+              Row {
+                required property var modelData
+                width: helpList.width
+                spacing: Style.space(12)
+
+                Text {
+                  width: Style.space(220)
+                  text: modelData.keys
+                  color: root.foreground
+                  font.family: root.monoFontFamily
+                  font.pixelSize: Style.font.body
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  width: parent.width - Style.space(220) - Style.space(12)
+                  text: modelData.desc
+                  color: root.foreground
+                  opacity: 0.75
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  wrapMode: Text.WordWrap
+                }
+              }
+            }
+          }
+        }
+      }
+
+      Column {
+        anchors.fill: parent
+        anchors.topMargin: card.contentTopInset
+        anchors.rightMargin: card.contentRightInset
+        anchors.bottomMargin: card.contentBottomInset
+        anchors.leftMargin: card.contentLeftInset
+        spacing: root.contentSpacing
+        visible: !root.editingSettings && !root.showHelp
 
         Rectangle {
           width: parent.width

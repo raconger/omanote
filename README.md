@@ -22,6 +22,8 @@ native macOS apps.
 - Sidebar (the results list) is collapsible, can sit on the left or the top,
   and its size is drag- or keyboard-adjustable
 - Full-screen toggle (`Ctrl+F`) for a bigger canvas when you want it
+- `Ctrl+/` shows a full keyboard-shortcut cheat sheet in place of the search
+  view; press it (or Escape) again to return
 - Keyboard nav (arrows, Page Up/Down, Home/End) and mouse both work
 
 Not in v1 (nvALT has these; flagging as candidate follow-ups, not built):
@@ -53,8 +55,9 @@ external sync (Simplenote/Supernote).
   and alphabetical by title.
 - `Ctrl+F` toggles full-screen.
 - `Ctrl+D` inserts today's date (`YYYY-MM-DD`) into the search/create field.
-- `Ctrl+B`/`Ctrl+L`/`Ctrl+[`/`Ctrl+]`/`Ctrl+.`/`Ctrl+F` all work whether the
-  search field or the note body currently has focus.
+- `Ctrl+/` shows/hides the keyboard-shortcut cheat sheet.
+- `Ctrl+B`/`Ctrl+L`/`Ctrl+[`/`Ctrl+]`/`Ctrl+.`/`Ctrl+F`/`Ctrl+/` all work
+  whether the search field or the note body currently has focus.
 
 ## Install
 
