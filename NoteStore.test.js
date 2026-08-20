@@ -125,6 +125,105 @@ test("buildRows omits the create row when the query is empty", function() {
   assert.strictEqual(rows.length, 0)
 })
 
+test("sortNotes defaults to most-recently-modified first", function() {
+  var notes = [
+    { title: "a", mtimeMs: 100 },
+    { title: "b", mtimeMs: 300 },
+    { title: "c", mtimeMs: 200 }
+  ]
+  var sorted = NoteStore.sortNotes(notes, "modified")
+  assert.deepStrictEqual(sorted.map(function(n) { return n.title }), ["b", "c", "a"])
+})
+
+test("sortNotes 'title' sorts alphabetically, case-insensitively", function() {
+  var notes = [
+    { title: "banana", mtimeMs: 1 },
+    { title: "Apple", mtimeMs: 2 },
+    { title: "cherry", mtimeMs: 3 }
+  ]
+  var sorted = NoteStore.sortNotes(notes, "title")
+  assert.deepStrictEqual(sorted.map(function(n) { return n.title }), ["Apple", "banana", "cherry"])
+})
+
+test("sortNotes does not mutate the input array", function() {
+  var notes = [{ title: "b", mtimeMs: 1 }, { title: "a", mtimeMs: 2 }]
+  var original = notes.slice()
+  NoteStore.sortNotes(notes, "title")
+  assert.deepStrictEqual(notes, original)
+})
+
+test("isoDateString formats as YYYY-MM-DD, zero-padded", function() {
+  assert.strictEqual(NoteStore.isoDateString(new Date(2026, 0, 5)), "2026-01-05")
+  assert.strictEqual(NoteStore.isoDateString(new Date(2026, 10, 21)), "2026-11-21")
+})
+
+test("listContinuation continues a dash bullet", function() {
+  var text = "- first item"
+  var result = NoteStore.listContinuation(text, text.length)
+  assert.ok(result)
+  assert.strictEqual(result.insertText, "\n- ")
+  assert.strictEqual(result.removeStart, result.removeEnd)
+})
+
+test("listContinuation continues an indented asterisk bullet", function() {
+  var text = "  * nested item"
+  var result = NoteStore.listContinuation(text, text.length)
+  assert.strictEqual(result.insertText, "\n  * ")
+})
+
+test("listContinuation continues a task checkbox as an unchecked box", function() {
+  var text = "- [x] done thing"
+  var result = NoteStore.listContinuation(text, text.length)
+  assert.strictEqual(result.insertText, "\n- [ ] ")
+})
+
+test("listContinuation increments a numbered list", function() {
+  var text = "3. third item"
+  var result = NoteStore.listContinuation(text, text.length)
+  assert.strictEqual(result.insertText, "\n4. ")
+})
+
+test("listContinuation preserves the ')' separator style", function() {
+  var text = "2) second item"
+  var result = NoteStore.listContinuation(text, text.length)
+  assert.strictEqual(result.insertText, "\n3) ")
+})
+
+test("listContinuation ends the list on an empty bullet instead of continuing it", function() {
+  var text = "- one\n- "
+  var result = NoteStore.listContinuation(text, text.length)
+  assert.ok(result)
+  assert.strictEqual(result.insertText, "")
+  assert.strictEqual(result.removeStart, 6)
+  assert.strictEqual(result.removeEnd, text.length)
+  assert.strictEqual(result.cursorAt, 6)
+})
+
+test("listContinuation ends the list on an empty numbered item", function() {
+  var text = "1. one\n2. "
+  var result = NoteStore.listContinuation(text, text.length)
+  assert.strictEqual(result.insertText, "")
+})
+
+test("listContinuation returns null for a plain (non-list) line", function() {
+  var text = "just a regular sentence"
+  assert.strictEqual(NoteStore.listContinuation(text, text.length), null)
+})
+
+test("listContinuation only looks at the current line, not the whole note", function() {
+  var text = "- a bullet\nsome plain text after it"
+  var result = NoteStore.listContinuation(text, text.length)
+  assert.strictEqual(result, null)
+})
+
+test("listContinuation works when Enter is pressed mid-line, not just at the end", function() {
+  var text = "- hello world"
+  var midPos = "- hello".length
+  var result = NoteStore.listContinuation(text, midPos)
+  assert.strictEqual(result.insertText, "\n- ")
+  assert.strictEqual(result.removeStart, midPos)
+})
+
 if (failures > 0) {
   console.log("\n" + failures + " test(s) failed")
   process.exit(1)

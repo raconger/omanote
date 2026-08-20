@@ -21,10 +21,6 @@ query_lower=${query,,}
 
 [[ -n "$notes_dir" && -d "$notes_dir" ]] || exit 0
 
-snippet_of() {
-  grep -m 1 -v '^[[:space:]]*$' "$1" 2>/dev/null | tr '\t\r\n' '   ' | cut -c1-160
-}
-
 shopt -s nullglob nocaseglob
 files=("$notes_dir"/*.md "$notes_dir"/*.markdown "$notes_dir"/*.txt)
 shopt -u nullglob nocaseglob
@@ -57,9 +53,13 @@ fi
 
 [[ ${#matched[@]} -gt 0 ]] || exit 0
 
-# Batch-stat mtimes in one process instead of one `stat` per file.
-mtimes=$(stat -c '%Y %n' -- "${matched[@]}" 2>/dev/null) \
-  || mtimes=$(stat -f '%m %N' -- "${matched[@]}" 2>/dev/null)
+# Batch-stat mtimes in one process instead of one per file. A file that
+# vanishes between the glob above and here (autosave temp-file swaps, a sync
+# client, a delete from another app — routine on a large, actively-edited
+# vault) makes `stat` exit non-zero even though it still printed correct
+# lines for every file that DID exist, so a missing file must not throw away
+# the rest of the batch: only its own entry is missing from the map below.
+mtimes=$(stat -c '%Y %n' -- "${matched[@]}" 2>/dev/null)
 
 declare -A mtime_by_path
 while IFS=' ' read -r mtime path; do
@@ -67,11 +67,26 @@ while IFS=' ' read -r mtime path; do
   mtime_by_path["$path"]=$mtime
 done <<< "$mtimes"
 
+# Batch the snippet reads too: one `grep` across all matched files instead of
+# one per file. -Z null-separates the filename from its content so a colon
+# in either (a note titled "Meeting: notes", a line containing a URL) can't
+# be mistaken for the field separator.
+declare -A snippet_by_path
+while IFS= read -r -d '' path && IFS= read -r line; do
+  snippet_by_path["$path"]=$line
+done < <(grep -m1 -Z -v '^[[:space:]]*$' -- "${matched[@]}" 2>/dev/null)
+
 {
   for file in "${matched[@]}"; do
     base=${file##*/}
     mtime=${mtime_by_path[$file]:-0}
-    printf '%s\t%s\t%s\n' "$mtime" "$base" "$(snippet_of "$file")"
+    # Pure parameter-expansion cleanup (no tr/cut fork per file): flatten
+    # embedded tabs/carriage returns and cap the length.
+    snippet=${snippet_by_path[$file]:-}
+    snippet=${snippet//$'\t'/ }
+    snippet=${snippet//$'\r'/ }
+    snippet=${snippet:0:160}
+    printf '%s\t%s\t%s\n' "$mtime" "$base" "$snippet"
   done
 } | sort -t $'\t' -k1,1nr &
 wait $!

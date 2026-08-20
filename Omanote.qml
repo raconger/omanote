@@ -30,6 +30,14 @@ Item {
   // UI can say so instead of silently looking like an empty folder.
   property string dirError: ""
 
+  // ---- layout preferences (persisted alongside notesDir) ----------------
+  property string sidebarPosition: "left"  // "left" | "top"
+  property bool sidebarCollapsed: false
+  property real sidebarFraction: 0.30      // fraction of width (left) or height (top)
+  readonly property real sidebarFractionMin: 0.15
+  readonly property real sidebarFractionMax: 0.6
+  property string sortMode: "modified"     // "modified" | "title"
+
   property var shell: null
   property var manifest: null
 
@@ -37,6 +45,9 @@ Item {
   property string filterText: ""
   property int selectedIndex: 0
   property bool cursorActive: false
+  // The most recent raw listing from list.sh, kept so cycling sortMode can
+  // re-render instantly from it instead of re-running the scan.
+  property string lastRaw: ""
   // Set while creating a brand-new note, so the editor targets a path that
   // doesn't exist in displayModel (and hasn't been written to disk) yet.
   property string manualOverridePath: ""
@@ -46,6 +57,10 @@ Item {
   // lets doSave() skip writing an empty file for a new note nobody typed
   // anything into.
   property bool noteFileExists: false
+  // Which side currently holds keyboard focus, for the dim-the-inactive-
+  // side focus treatment — cheaper and less visually noisy in a small
+  // overlay than a border highlight on the active side.
+  readonly property bool editorActive: contentEditor.activeFocus
 
   // Shares the [menu] surface tokens — themes that style the menu also
   // style Omanote.
@@ -62,8 +77,8 @@ Item {
   property int contentMargin: Style.spacing.panelPadding
   property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
   property int contentSpacing: Style.spacing.md
-  property int cardWidth: Math.min(Style.space(900), panel.width - Style.gapsOut * 2)
-  property int cardHeight: Math.min(Style.space(600), panel.height - Style.gapsOut * 2)
+  property int cardWidth: Math.min(Style.space(600), panel.width - Style.gapsOut * 2)
+  property int cardHeight: Math.min(Style.space(400), panel.height - Style.gapsOut * 2)
   property int rowHeight: Math.max(Style.space(50), Style.font.body + Style.font.caption + Style.spacing.rowPaddingX * 2)
 
   readonly property var selectedRow: (root.cursorActive && root.selectedIndex >= 0 && root.selectedIndex < displayModel.count)
@@ -132,6 +147,13 @@ Item {
     try { parsed = JSON.parse(String(raw || "{}")) || {} } catch (e) { parsed = {} }
     var persisted = String(parsed.notesDir || "")
     root.notesDir = persisted || Quickshell.env("OMANOTE_NOTES_DIR") || ""
+    root.sidebarPosition = parsed.sidebarPosition === "top" ? "top" : "left"
+    root.sidebarCollapsed = !!parsed.sidebarCollapsed
+    var fraction = Number(parsed.sidebarFraction)
+    root.sidebarFraction = isFinite(fraction) && fraction > 0
+      ? Math.max(root.sidebarFractionMin, Math.min(root.sidebarFractionMax, fraction))
+      : root.sidebarFraction
+    root.sortMode = parsed.sortMode === "title" ? "title" : "modified"
     root.settingsLoaded = true
     if (root.notesDir) root.runList()
     if (root.opened) root.afterSettingsReady()
@@ -139,7 +161,13 @@ Item {
 
   function saveSettings() {
     root.ensureDir(root.homeDir + "/.local/state/omarchy")
-    settingsFile.setText(JSON.stringify({ notesDir: root.notesDir }, null, 2) + "\n")
+    settingsFile.setText(JSON.stringify({
+      notesDir: root.notesDir,
+      sidebarPosition: root.sidebarPosition,
+      sidebarCollapsed: root.sidebarCollapsed,
+      sidebarFraction: root.sidebarFraction,
+      sortMode: root.sortMode
+    }, null, 2) + "\n")
   }
 
   function ensureDir(path) {
@@ -174,6 +202,39 @@ Item {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
+  // ---- layout preferences ------------------------------------------------
+
+  function toggleSidebar() {
+    root.sidebarCollapsed = !root.sidebarCollapsed
+    root.saveSettings()
+  }
+
+  function toggleSidebarPosition() {
+    root.sidebarPosition = root.sidebarPosition === "top" ? "left" : "top"
+    root.saveSettings()
+  }
+
+  function nudgeSidebarFraction(delta) {
+    root.sidebarFraction = Math.max(root.sidebarFractionMin,
+      Math.min(root.sidebarFractionMax, root.sidebarFraction + delta))
+    root.saveSettings()
+  }
+
+  function setSidebarFraction(fraction) {
+    root.sidebarFraction = Math.max(root.sidebarFractionMin,
+      Math.min(root.sidebarFractionMax, fraction))
+  }
+
+  function cycleSortMode() {
+    root.sortMode = root.sortMode === "modified" ? "title" : "modified"
+    root.saveSettings()
+    root.applyListing(root.lastRaw)
+  }
+
+  function insertIsoDate() {
+    root.setFilter(root.filterText + NoteStore.isoDateString(new Date()))
+  }
+
   function runList() {
     if (!root.expandedNotesDir) {
       displayModel.clear()
@@ -193,7 +254,9 @@ Item {
   }
 
   function applyListing(raw) {
+    root.lastRaw = raw
     var notes = NoteStore.parseListing(raw)
+    notes = NoteStore.sortNotes(notes, root.sortMode)
     var rows = NoteStore.buildRows(notes, root.filterText)
 
     displayModel.clear()
@@ -377,6 +440,16 @@ Item {
     onTriggered: root.runList()
   }
 
+  Timer {
+    id: caretBlink
+    property bool caretVisible: true
+    interval: 530
+    running: root.opened
+    repeat: true
+    onTriggered: caretVisible = !caretVisible
+    onRunningChanged: if (running) caretVisible = true
+  }
+
   PanelWindow {
     id: panel
     visible: root.opened
@@ -458,6 +531,7 @@ Item {
           }
 
           Text {
+            id: settingsInputText
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
@@ -467,6 +541,16 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
             elide: Text.ElideMiddle
+          }
+
+          Rectangle {
+            visible: settingsCatcher.activeFocus && caretBlink.caretVisible
+              && settingsInputText.paintedWidth < settingsInputText.width
+            x: settingsInputText.x + settingsInputText.paintedWidth + Style.space(2)
+            anchors.verticalCenter: settingsInputText.verticalCenter
+            width: Math.max(1, Style.space(2))
+            height: Style.font.body
+            color: root.foreground
           }
         }
 
@@ -495,6 +579,24 @@ Item {
             event.accepted = true
           } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_Comma) {
             root.beginSettingsEdit(root.notesDir)
+            event.accepted = true
+          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_B) {
+            root.toggleSidebar()
+            event.accepted = true
+          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_L) {
+            root.toggleSidebarPosition()
+            event.accepted = true
+          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_BracketLeft) {
+            root.nudgeSidebarFraction(-0.02)
+            event.accepted = true
+          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_BracketRight) {
+            root.nudgeSidebarFraction(0.02)
+            event.accepted = true
+          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_Period) {
+            root.cycleSortMode()
+            event.accepted = true
+          } else if (event.modifiers & Qt.ControlModifier && event.key === Qt.Key_D) {
+            root.insertIsoDate()
             event.accepted = true
           } else if (Util.editsFilter(event, root.filterText)) {
             root.setFilter(Util.editedFilter(event, root.filterText))
@@ -543,6 +645,7 @@ Item {
           color: "transparent"
 
           Text {
+            id: filterTextLabel
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
@@ -552,6 +655,16 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
             elide: Text.ElideRight
+          }
+
+          Rectangle {
+            visible: keyCatcher.activeFocus && caretBlink.caretVisible
+              && filterTextLabel.paintedWidth < filterTextLabel.width
+            x: filterTextLabel.x + filterTextLabel.paintedWidth + Style.space(2)
+            anchors.verticalCenter: filterTextLabel.verticalCenter
+            width: Math.max(1, Style.space(2))
+            height: Style.font.heading
+            color: root.foreground
           }
         }
 
@@ -567,165 +680,221 @@ Item {
         }
 
         Item {
+          id: splitContainer
           width: parent.width
           height: parent.height - root.headerHeight - root.contentSpacing
             - (root.dirError !== "" ? errorText.height + root.contentSpacing : 0)
 
-          Row {
-            anchors.fill: parent
-            spacing: 0
+          readonly property bool isTop: root.sidebarPosition === "top"
+          readonly property bool listVisible: !root.sidebarCollapsed
+          readonly property int dividerThickness: Style.space(6)
+          readonly property int listSize: listVisible
+            ? Math.round((isTop ? height : width) * root.sidebarFraction)
+            : 0
 
-            Item {
-              width: parent.width * 0.38
-              height: parent.height
+          Item {
+            id: listPane
+            visible: splitContainer.listVisible
+            clip: true
+            x: 0
+            y: 0
+            width: splitContainer.isTop ? splitContainer.width : splitContainer.listSize
+            height: splitContainer.isTop ? splitContainer.listSize : splitContainer.height
+            opacity: root.editorActive ? 0.55 : 1
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+
+            ListView {
+              id: resultList
+              anchors.fill: parent
+              anchors.rightMargin: splitContainer.isTop ? 0 : root.contentMargin
+              anchors.bottomMargin: splitContainer.isTop ? root.contentMargin : 0
+              model: displayModel
               clip: true
+              spacing: Style.space(4)
+              boundsBehavior: Flickable.StopAtBounds
 
-              ListView {
-                id: resultList
-                anchors.fill: parent
-                anchors.rightMargin: root.contentMargin
-                model: displayModel
-                clip: true
-                spacing: Style.space(4)
-                boundsBehavior: Flickable.StopAtBounds
+              delegate: Rectangle {
+                id: row
+                required property int index
+                required property string rowType
+                required property string title
+                required property string snippet
+                required property real mtimeMs
 
-                delegate: Rectangle {
-                  id: row
-                  required property int index
-                  required property string rowType
-                  required property string title
-                  required property string snippet
-                  required property real mtimeMs
+                readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
 
-                  readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
+                width: ListView.view.width
+                height: root.rowHeight
+                radius: root.cornerRadius
+                color: hasCursor ? root.selectedBackground : "transparent"
 
-                  width: ListView.view.width
-                  height: root.rowHeight
-                  radius: root.cornerRadius
-                  color: hasCursor ? root.selectedBackground : "transparent"
+                Column {
+                  anchors.fill: parent
+                  anchors.leftMargin: Style.space(12)
+                  anchors.rightMargin: Style.space(12)
+                  anchors.topMargin: Style.space(6)
+                  anchors.bottomMargin: Style.space(6)
+                  spacing: Style.space(2)
 
-                  Column {
-                    anchors.fill: parent
-                    anchors.leftMargin: Style.space(12)
-                    anchors.rightMargin: Style.space(12)
-                    anchors.topMargin: Style.space(6)
-                    anchors.bottomMargin: Style.space(6)
-                    spacing: Style.space(2)
-
-                    Text {
-                      width: parent.width
-                      text: row.title
-                      color: row.hasCursor ? root.selectedText : root.foreground
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.title
-                      font.italic: row.rowType === "create"
-                      elide: Text.ElideRight
-                    }
-
-                    Text {
-                      width: parent.width
-                      visible: row.rowType === "note"
-                      text: (row.mtimeMs ? NoteStore.formatRelativeTime(row.mtimeMs) + "  ·  " : "") + row.snippet
-                      color: row.hasCursor ? root.selectedText : root.foreground
-                      opacity: 0.62
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                      elide: Text.ElideRight
-                    }
+                  Text {
+                    width: parent.width
+                    text: row.title
+                    color: row.hasCursor ? root.selectedText : root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    font.italic: row.rowType === "create"
+                    elide: Text.ElideRight
                   }
 
-                  MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onPositionChanged: function(mouse) {
-                      root.selectFromPointer(row.index, row, mouse)
-                    }
-                    onClicked: {
-                      root.cursorActive = true
-                      root.selectedIndex = row.index
-                      root.activateSelection()
-                    }
+                  Text {
+                    width: parent.width
+                    visible: row.rowType === "note"
+                    text: (row.mtimeMs ? NoteStore.formatRelativeTime(row.mtimeMs) + "  ·  " : "") + row.snippet
+                    color: row.hasCursor ? root.selectedText : root.foreground
+                    opacity: 0.62
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onPositionChanged: function(mouse) {
+                    root.selectFromPointer(row.index, row, mouse)
+                  }
+                  onClicked: {
+                    root.cursorActive = true
+                    root.selectedIndex = row.index
+                    root.activateSelection()
                   }
                 }
               }
             }
+          }
 
-            Item {
-              width: parent.width * 0.62
-              height: parent.height
-              clip: true
+          Item {
+            id: editorPane
+            clip: true
+            x: splitContainer.isTop ? 0 : splitContainer.listSize
+            y: splitContainer.isTop ? splitContainer.listSize : 0
+            width: splitContainer.isTop ? splitContainer.width : (splitContainer.width - splitContainer.listSize)
+            height: splitContainer.isTop ? (splitContainer.height - splitContainer.listSize) : splitContainer.height
 
-              Rectangle {
-                anchors.left: parent.left
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                width: Style.normalBorderWidth
-                color: Util.alpha(root.border, 0.28)
+            Rectangle {
+              visible: splitContainer.listVisible
+              width: splitContainer.isTop ? parent.width : Style.normalBorderWidth
+              height: splitContainer.isTop ? Style.normalBorderWidth : parent.height
+              color: Util.alpha(root.border, 0.28)
+            }
+
+            Column {
+              anchors.fill: parent
+              anchors.leftMargin: splitContainer.isTop ? 0 : root.contentMargin
+              anchors.topMargin: splitContainer.isTop ? root.contentMargin : 0
+              visible: root.hasActiveNote
+              spacing: Style.space(6)
+              opacity: root.editorActive ? 1 : 0.55
+              Behavior on opacity { NumberAnimation { duration: 120 } }
+
+              Text {
+                width: parent.width
+                text: root.activeNoteTitle
+                color: root.foreground
+                opacity: 0.7
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
               }
 
-              Column {
-                anchors.fill: parent
-                anchors.leftMargin: root.contentMargin
-                visible: root.hasActiveNote
-                spacing: Style.space(6)
+              Flickable {
+                width: parent.width
+                height: parent.height - Style.space(24)
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                contentWidth: width
+                contentHeight: contentEditor.implicitHeight
 
-                Text {
+                TextEdit {
+                  id: contentEditor
                   width: parent.width
-                  text: root.activeNoteTitle
                   color: root.foreground
-                  opacity: 0.7
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
+                  font.family: root.monoFontFamily
+                  font.pixelSize: Style.font.heading
+                  wrapMode: TextEdit.Wrap
+                  selectByMouse: true
+                  persistentSelection: true
+                  onTextChanged: if (!root.suppressSave) saveTimer.restart()
 
-                Flickable {
-                  width: parent.width
-                  height: parent.height - Style.space(24)
-                  clip: true
-                  boundsBehavior: Flickable.StopAtBounds
-                  contentWidth: width
-                  contentHeight: contentEditor.implicitHeight
-
-                  TextEdit {
-                    id: contentEditor
-                    width: parent.width
-                    color: root.foreground
-                    font.family: root.monoFontFamily
-                    font.pixelSize: Style.font.body
-                    wrapMode: TextEdit.Wrap
-                    selectByMouse: true
-                    persistentSelection: true
-                    onTextChanged: if (!root.suppressSave) saveTimer.restart()
-
-                    Keys.onPressed: function(event) {
-                      if (event.key === Qt.Key_Escape) {
-                        root.flushSave()
-                        Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+                  Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Escape) {
+                      root.flushSave()
+                      Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+                      event.accepted = true
+                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                      var edit = NoteStore.listContinuation(contentEditor.text, contentEditor.cursorPosition)
+                      if (edit) {
+                        if (edit.removeEnd > edit.removeStart) contentEditor.remove(edit.removeStart, edit.removeEnd)
+                        if (edit.insertText) contentEditor.insert(edit.removeStart, edit.insertText)
+                        contentEditor.cursorPosition = edit.cursorAt
                         event.accepted = true
                       }
                     }
                   }
                 }
               }
+            }
 
-              Column {
-                anchors.centerIn: parent
-                spacing: Style.space(8)
-                visible: !root.hasActiveNote
+            Column {
+              anchors.centerIn: parent
+              spacing: Style.space(8)
+              visible: !root.hasActiveNote
 
-                Text {
-                  text: displayModel.count === 0 && root.filterText === "" ? "Type to search or create a note" : "No note selected"
-                  color: root.foreground
-                  opacity: 0.7
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.title
-                  horizontalAlignment: Text.AlignHCenter
-                  width: parent.width
-                }
+              Text {
+                text: displayModel.count === 0 && root.filterText === "" ? "Type to search or create a note" : "No note selected"
+                color: root.foreground
+                opacity: 0.7
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.title
+                horizontalAlignment: Text.AlignHCenter
+                width: parent.width
               }
             }
+          }
+
+          MouseArea {
+            id: dividerDrag
+            visible: splitContainer.listVisible
+            cursorShape: splitContainer.isTop ? Qt.SizeVerCursor : Qt.SizeHorCursor
+            x: splitContainer.isTop ? 0 : splitContainer.listSize - width / 2
+            y: splitContainer.isTop ? splitContainer.listSize - height / 2 : 0
+            width: splitContainer.isTop ? splitContainer.width : splitContainer.dividerThickness * 2
+            height: splitContainer.isTop ? splitContainer.dividerThickness * 2 : splitContainer.height
+
+            // Tracked as a delta from the press point rather than an
+            // absolute position: this MouseArea's own x/y move as
+            // sidebarFraction changes (it's pinned to the boundary it
+            // drags), so re-deriving an absolute fraction from mouse.x/y
+            // on every move would be reasoning about a moving target.
+            property real dragStartFraction: 0
+            property real dragStartPos: 0
+
+            onPressed: function(mouse) {
+              dragStartFraction = root.sidebarFraction
+              var pos = mapToItem(splitContainer, mouse.x, mouse.y)
+              dragStartPos = splitContainer.isTop ? pos.y : pos.x
+            }
+            onPositionChanged: function(mouse) {
+              if (!pressed) return
+              var pos = mapToItem(splitContainer, mouse.x, mouse.y)
+              var current = splitContainer.isTop ? pos.y : pos.x
+              var totalSize = splitContainer.isTop ? splitContainer.height : splitContainer.width
+              if (totalSize <= 0) return
+              root.setSidebarFraction(dragStartFraction + (current - dragStartPos) / totalSize)
+            }
+            onReleased: root.saveSettings()
           }
         }
       }

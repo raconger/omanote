@@ -112,6 +112,70 @@ function joinPath(dir, fileName) {
   return base + "/" + String(fileName || "")
 }
 
+var SORT_MODES = ["modified", "title"]
+
+function sortNotes(notes, mode) {
+  var values = Array.isArray(notes) ? notes.slice() : []
+  if (mode === "title") {
+    values.sort(function(a, b) {
+      return String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base" })
+    })
+  } else {
+    // "modified" (default): most recently modified first. list.sh already
+    // emits rows in this order, but sorting here too keeps behavior correct
+    // if that ever changes, and makes the ordering independently testable.
+    values.sort(function(a, b) { return b.mtimeMs - a.mtimeMs })
+  }
+  return values
+}
+
+// Two-digit zero-padding without relying on Number.prototype.padStart, so
+// this keeps working under whatever JS engine QtQml embeds.
+function pad2(n) {
+  return (n < 10 ? "0" : "") + n
+}
+
+function isoDateString(date) {
+  var d = date || new Date()
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate())
+}
+
+// Enter-to-continue-list behavior for the note editor: given the full text
+// and the cursor offset where Return was pressed, decides whether the
+// current line is a markdown bullet/task/numbered item and, if so, how to
+// edit the text to continue (or, on an empty item, end) the list. Returns
+// null when the current line isn't a list item at all, so the caller can
+// fall through to inserting a plain newline.
+function listContinuation(text, pos) {
+  var s = String(text || "")
+  var cursor = Math.max(0, Math.min(pos || 0, s.length))
+  var lineStart = s.lastIndexOf("\n", cursor - 1) + 1
+  var line = s.slice(lineStart, cursor)
+
+  var bulletMatch = line.match(/^(\s*)([-*+])((?:\s+\[[ xX]\])?)\s+(.*)$/)
+  if (bulletMatch) {
+    var indent = bulletMatch[1], marker = bulletMatch[2], checkbox = bulletMatch[3], rest = bulletMatch[4]
+    if (rest.trim() === "") {
+      return { removeStart: lineStart, removeEnd: cursor, insertText: "", cursorAt: lineStart }
+    }
+    var checkboxOut = checkbox ? " [ ]" : ""
+    var insertion = "\n" + indent + marker + checkboxOut + " "
+    return { removeStart: cursor, removeEnd: cursor, insertText: insertion, cursorAt: cursor + insertion.length }
+  }
+
+  var numberedMatch = line.match(/^(\s*)(\d+)([.)])\s+(.*)$/)
+  if (numberedMatch) {
+    var numIndent = numberedMatch[1], num = parseInt(numberedMatch[2], 10), sep = numberedMatch[3], numRest = numberedMatch[4]
+    if (numRest.trim() === "") {
+      return { removeStart: lineStart, removeEnd: cursor, insertText: "", cursorAt: lineStart }
+    }
+    var numInsertion = "\n" + numIndent + (num + 1) + sep + " "
+    return { removeStart: cursor, removeEnd: cursor, insertText: numInsertion, cursorAt: cursor + numInsertion.length }
+  }
+
+  return null
+}
+
 // Builds the rows for the results list: every matching note, plus (when the
 // query doesn't exactly match an existing note) a trailing synthetic
 // "create" row. This is the one function the QML view drives directly, so
@@ -149,6 +213,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     NOTE_EXTENSIONS: NOTE_EXTENSIONS,
     DEFAULT_EXTENSION: DEFAULT_EXTENSION,
+    SORT_MODES: SORT_MODES,
     expandHome: expandHome,
     stripExtension: stripExtension,
     titleForFile: titleForFile,
@@ -157,6 +222,9 @@ if (typeof module !== "undefined") {
     formatRelativeTime: formatRelativeTime,
     isExactMatch: isExactMatch,
     joinPath: joinPath,
+    sortNotes: sortNotes,
+    isoDateString: isoDateString,
+    listContinuation: listContinuation,
     buildRows: buildRows
   }
 }

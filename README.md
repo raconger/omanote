@@ -15,7 +15,12 @@ native macOS apps.
 - Live filter-as-you-type across note filenames and content
 - Instant inline preview/edit of the top match — no separate "open" step
 - Create-on-miss: type a title that doesn't exist, hit Return, start typing
-- Flat-folder storage (`.md`, `.markdown`, `.txt`), sorted by most recently modified
+- Flat-folder storage (`.md`, `.markdown`, `.txt`)
+- Sortable list — most-recently-modified (default) or alphabetical by title
+- Markdown list continuation: `Enter` on a bullet, task checkbox, or numbered
+  item continues it; `Enter` on an empty one ends the list instead
+- Sidebar (the results list) is collapsible, can sit on the left or the top,
+  and its size is drag- or keyboard-adjustable
 - Keyboard nav (arrows, Page Up/Down, Home/End) and mouse both work
 
 Not in v1 (nvALT has these; flagging as candidate follow-ups, not built):
@@ -31,9 +36,21 @@ locking/encryption, external sync (Simplenote/Supernote).
   hands focus to the note body so typing edits it.
 - Just start typing in the note body — it autosaves (debounced). `Escape`
   returns focus to search.
+  - `Enter` on a list line (`- `, `* `, `1. `, `- [ ] `/`- [x] `, or an
+    indented variant) continues that list on the next line; press `Enter`
+    again on an empty list item to end the list.
 - `Escape` on an empty search closes Omanote; with text in the box, it
   clears the search first.
+- The side not currently focused (the list while editing, the editor while
+  browsing) dims slightly so it's clear where typing will land.
 - `Ctrl+,` opens the "change notes folder" prompt.
+- `Ctrl+B` collapses/expands the sidebar.
+- `Ctrl+L` moves the sidebar between the left side and the top.
+- `Ctrl+[` / `Ctrl+]` shrinks/grows the sidebar by keyboard; it's also
+  drag-resizable from the divider between it and the editor.
+- `Ctrl+.` cycles the sort order between most-recently-modified (default)
+  and alphabetical by title.
+- `Ctrl+D` inserts today's date (`YYYY-MM-DD`) into the search/create field.
 
 ## Install
 
@@ -78,13 +95,19 @@ bind = SUPER, N, exec, omarchy-shell shell toggle io.github.raconger.omanote '{}
 - `manifest.json` — plugin metadata, declares the `overlay` entry point
 - `Omanote.qml` — the overlay: search field, results list, preview/edit pane
 - `NoteStore.js` — pure, dependency-free logic (filename sanitizing, listing
-  parsing, relative-time formatting, create-on-miss row building). Loads both
-  as a QML JS module and as a plain Node module, so it's unit-testable
-  without Quickshell.
+  parsing, relative-time formatting, create-on-miss row building, sort
+  ordering, markdown list continuation). Loads both as a QML JS module and
+  as a plain Node module, so it's unit-testable without Quickshell.
 - `list.sh` — lists (and filters) the notes folder; run as a subprocess so
-  the QML side never touches the filesystem directly for search
-- `~/.local/state/omarchy/omanote.json` — the one setting Omanote persists
-  (your chosen notes folder), written by the in-overlay settings prompt
+  the QML side never touches the filesystem directly for search. Filename
+  matching happens in pure bash (no fork per file); content matching,
+  mtimes, and snippets are each one batched process across every candidate
+  file instead of one process per file, so search stays fast even in a
+  vault with thousands of notes.
+- `~/.local/state/omarchy/omanote.json` — settings Omanote persists: your
+  chosen notes folder, sidebar position/collapsed/size, and sort order.
+  Written by the in-overlay settings prompt and by the layout/sort
+  keybindings below.
 
 ## Testing
 
