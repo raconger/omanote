@@ -782,6 +782,15 @@ Item {
             height: Style.font.heading
             color: root.foreground
           }
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.IBeamCursor
+            onClicked: {
+              root.flushSave()
+              Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+            }
+          }
         }
 
         Text {
