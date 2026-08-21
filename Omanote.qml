@@ -126,7 +126,6 @@ Item {
     root.selectedIndex = 0
     root.cursorActive = false
     root.manualOverridePath = ""
-    root.disarmPointer()
 
     if (args.notesDir) {
       root.notesDir = String(args.notesDir)
@@ -343,16 +342,11 @@ Item {
     }
   }
 
-  function disarmPointer() {
-    pointerGate.reset()
-  }
-
   function setFilter(nextFilter) {
     root.flushSave()
     root.manualOverridePath = ""
     root.filterText = nextFilter
     root.selectedIndex = 0
-    root.disarmPointer()
     // Debounced: re-running the scan cancels whatever's in flight (see
     // runList/listProc), and that cancel has real teardown cost, so firing
     // it on every keystroke of a fast burst makes typing feel slower, not
@@ -364,7 +358,6 @@ Item {
     if (displayModel.count === 0) return
     root.manualOverridePath = ""
     root.flushSave()
-    root.disarmPointer()
     root.cursorActive = true
     root.selectedIndex = (root.selectedIndex + delta + displayModel.count) % displayModel.count
     resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
@@ -374,18 +367,9 @@ Item {
     if (displayModel.count === 0) return
     root.manualOverridePath = ""
     root.flushSave()
-    root.disarmPointer()
     root.cursorActive = true
     root.selectedIndex = Math.max(0, Math.min(index, displayModel.count - 1))
     resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
-  }
-
-  function selectFromPointer(index, item, mouse) {
-    if (!pointerGate.moved(item, mouse)) return
-    root.manualOverridePath = ""
-    root.flushSave()
-    root.cursorActive = true
-    root.selectedIndex = index
   }
 
   // Enter: create-on-miss when the highlighted row is the synthetic "create"
@@ -462,11 +446,6 @@ Item {
         root.ensureDir(next)
       }
     }
-  }
-
-  PointerMoveGate {
-    id: pointerGate
-    referenceItem: card
   }
 
   Process {
@@ -897,11 +876,7 @@ Item {
 
                 MouseArea {
                   anchors.fill: parent
-                  hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
-                  onPositionChanged: function(mouse) {
-                    root.selectFromPointer(row.index, row, mouse)
-                  }
                   onClicked: {
                     root.cursorActive = true
                     root.selectedIndex = row.index
